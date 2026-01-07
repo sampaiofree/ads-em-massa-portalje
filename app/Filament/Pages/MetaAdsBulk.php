@@ -26,7 +26,6 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Table;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Throwable;
 
@@ -93,7 +92,7 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                             ->label('Conta de anuncios')
                             ->options(fn () => $this->getAdAccountOptions())
                             ->searchable()
-                            ->required()
+                            ->required(fn () => $this->hasValidConnection())
                             ->disabled(fn () => !$this->hasValidConnection())
                             ->reactive()
                             ->afterStateUpdated(fn (callable $set) => $set('pixel_id', null)),
@@ -101,7 +100,7 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                             ->label('Pagina do Facebook')
                             ->options(fn () => $this->getPageOptions())
                             ->searchable()
-                            ->required()
+                            ->required(fn () => $this->hasValidConnection())
                             ->disabled(fn () => !$this->hasValidConnection()),
                         Select::make('instagram_actor_id')
                             ->label('Conta do Instagram')
@@ -112,7 +111,7 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                             ->label('Pixel')
                             ->options(fn (Get $get) => $this->getPixelOptions($get('ad_account_id')))
                             ->searchable()
-                            ->required()
+                            ->required(fn () => $this->hasValidConnection())
                             ->disabled(fn () => !$this->hasValidConnection()),
                     ])
                     ->columns(2),
@@ -224,11 +223,6 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
             ],
         ]);
 
-        MetaConnection::updateOrCreate(
-            ['user_id' => $user->id],
-            $this->buildMetaConnectionPayload($data)
-        );
-
         ProcessMetaAdBatch::dispatch($batch->id);
 
         Notification::make()
@@ -273,9 +267,19 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
 
     public function openConnectPopup(): void
     {
-        $data = $this->form->getState();
+        $data = $this->form->getRawState();
+        $appId = $data['app_id'] ?? null;
+        $appSecret = $data['app_secret'] ?? null;
 
-        if (empty($data['app_id']) || empty($data['app_secret'])) {
+        if (is_string($appId)) {
+            $appId = trim($appId);
+        }
+
+        if (is_string($appSecret)) {
+            $appSecret = trim($appSecret);
+        }
+
+        if ($appId === null || $appId === '' || $appSecret === null || $appSecret === '') {
             Notification::make()
                 ->danger()
                 ->title('Informe App ID e App Secret antes de conectar.')
@@ -286,7 +290,7 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
         $user = Auth::user();
         MetaConnection::updateOrCreate(
             ['user_id' => $user->id],
-            $this->buildMetaConnectionPayload($data)
+            $this->buildMetaConnectionPayload($appId, $appSecret)
         );
 
         $this->dispatch('meta-connect', url: route('meta.connect', ['popup' => 1]));
@@ -450,16 +454,12 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
         ];
     }
 
-    private function buildMetaConnectionPayload(array $data): array
+    private function buildMetaConnectionPayload(string $appId, string $appSecret): array
     {
-        $payload = Arr::only($data, [
-            'app_id',
-            'app_secret',
-            'ad_account_id',
-            'page_id',
-            'instagram_actor_id',
-            'pixel_id',
-        ]);
+        $payload = [
+            'app_id' => $appId,
+            'app_secret' => $appSecret,
+        ];
 
         return array_filter($payload, fn ($value) => $value !== null && $value !== '');
     }

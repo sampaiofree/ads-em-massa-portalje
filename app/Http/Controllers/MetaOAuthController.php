@@ -99,8 +99,8 @@ class MetaOAuthController extends Controller
         $connection = $request->user()?->metaConnection;
 
         return [
-            $connection?->app_id ?: config('meta.app_id'),
-            $connection?->app_secret ?: config('meta.app_secret'),
+            $connection?->app_id,
+            $connection?->app_secret,
         ];
     }
 }
