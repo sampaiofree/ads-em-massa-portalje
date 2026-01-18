@@ -6,6 +6,7 @@ return [
     'redirect_uri' => env('META_REDIRECT_URI'),
     'graph_version' => env('META_GRAPH_VERSION', 'v20.0'),
     'oauth_scopes' => env('META_OAUTH_SCOPES', 'public_profile,email,ads_management,ads_read,business_management,pages_show_list,instagram_basic'),
+    'special_ad_categories' => env('META_SPECIAL_AD_CATEGORIES', 'NONE'),
     'font_path' => env('META_FONT_PATH', resource_path('fonts/meta-ads-bold.ttf')),
     'curl_verify' => env('META_CURL_VERIFY', null),
 ];

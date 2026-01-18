@@ -12,6 +12,7 @@ class MetaAdBatch extends Model
         'user_id',
         'name',
         'objective',
+        'destination_type',
         'ad_account_id',
         'page_id',
         'instagram_actor_id',
@@ -29,12 +30,16 @@ class MetaAdBatch extends Model
         'success_count',
         'error_count',
         'meta_campaign_id',
+        'cancel_requested_at',
+        'cancelled_at',
         'settings',
     ];
 
     protected $casts = [
         'start_at' => 'datetime',
         'auto_activate' => 'boolean',
+        'cancel_requested_at' => 'datetime',
+        'cancelled_at' => 'datetime',
         'settings' => 'array',
     ];
 

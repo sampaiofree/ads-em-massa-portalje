@@ -1,17 +1,24 @@
 <x-filament::page>
     <div class="grid grid-cols-1 gap-6 md:grid-cols-3">
         <div class="md:col-span-2">
-            <form wire:submit="createBatch" class="space-y-6">
+            <form wire:submit="createBatch" class="space-y-6" style="margin-bottom: 50px;">
                 {{ $this->form }}
 
                 <x-filament::button type="submit">
                     Criar anuncios
                 </x-filament::button>
             </form>
+            <x-filament::section>
+                    <x-slot name="heading">
+                        Historico de lotes
+                    </x-slot>
+
+                    {{ $this->table }}
+            </x-filament::section>
         </div>
 
         <div class="md:col-span-1">
-            <div class="space-y-6 md:sticky md:top-6 md:self-start">
+            <div class="space-y-6 md:sticky md:top-6 md:self-start" style="position: fixed;">
                 <x-filament::section>
                     <x-slot name="heading">
                         Previa do bloco de texto
@@ -60,13 +67,7 @@
                     </div>
                 </x-filament::section>
 
-                <x-filament::section>
-                    <x-slot name="heading">
-                        Historico de lotes
-                    </x-slot>
-
-                    {{ $this->table }}
-                </x-filament::section>
+                
             </div>
         </div>
     </div>

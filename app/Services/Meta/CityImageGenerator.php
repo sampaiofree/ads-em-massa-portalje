@@ -13,7 +13,8 @@ class CityImageGenerator
         imagealphablending($image, true);
         imagesavealpha($image, true);
 
-        $text = trim((string) ($overlay['text'] ?? ''));
+        // ALTERAÇÃO 1: Trim e conversão para CAIXA ALTA (Multibyte para suportar acentos)
+        $text = mb_strtoupper(trim((string) ($overlay['text'] ?? '')), 'UTF-8');
 
         if ($text !== '') {
             $this->drawTextBlock($image, $text, $overlay);
@@ -44,7 +45,7 @@ class CityImageGenerator
     {
         $width = imagesx($image);
         $height = imagesy($image);
-        $padding = 2;
+        $padding = 5;
         $radius = 10;
         $alpha = 38;
 
@@ -53,6 +54,14 @@ class CityImageGenerator
         $backgroundColor = $this->allocateColor($image, (string) ($overlay['bg_color'] ?? '#000000'), $alpha);
         $posX = $this->normalizePercent($overlay['position_x'] ?? 50);
         $posY = $this->normalizePercent($overlay['position_y'] ?? 12);
+
+        $bgHex = (string) ($overlay['bg_color'] ?? '#000000');
+        $isTransparent = ($bgHex === 'transparent' || ($overlay['bg_transparent'] ?? false));
+
+        // Só alocamos a cor de fundo e desenhamos se NÃO for transparente
+        if (!$isTransparent) {
+            $backgroundColor = $this->allocateColor($image, $bgHex, $alpha);
+        }
 
         $lines = $this->normalizeLines($text);
         if (!$lines) {
@@ -71,6 +80,10 @@ class CityImageGenerator
 
             [$rectX, $rectY] = $this->positionRect($width, $height, $rectWidth, $rectHeight, $posX, $posY);
             $this->drawRoundedRectangle($image, $rectX, $rectY, $rectWidth, $rectHeight, $radius, $backgroundColor);
+
+            if (!$isTransparent) {
+                $this->drawRoundedRectangle($image, $rectX, $rectY, $rectWidth, $rectHeight, $radius, $backgroundColor);
+            }
 
             $textY = $rectY + $padding + $maxLineHeight;
             foreach ($lines as $line) {
@@ -117,7 +130,7 @@ class CityImageGenerator
 
     private function fitFontSizeForLines(string $fontPath, array $lines, int $maxWidth, int $maxHeight): int
     {
-        $fontSize = 180;
+        $fontSize = 41;
         $minFontSize = 8;
 
         while ($fontSize > $minFontSize) {

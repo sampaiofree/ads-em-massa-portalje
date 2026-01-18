@@ -25,6 +25,7 @@ use Filament\Forms\Get;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Tables\Actions\Action as TableAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -55,7 +56,6 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
         $connection = $this->connection();
 
         $this->form->fill([
-            'objective' => 'OUTCOME_LEADS',
             'daily_budget' => 6.6,
             'start_at' => now()->addMinutes(10),
             'title_template' => '{cidade} RECEBE +40 CURSOS PROFISSIONALIZANTES',
@@ -67,7 +67,6 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
             'overlay_position_y' => 12,
             'ad_account_id' => $connection?->ad_account_id,
             'page_id' => $connection?->page_id,
-            'instagram_actor_id' => $connection?->instagram_actor_id,
             'pixel_id' => $connection?->pixel_id,
         ]);
     }
@@ -76,6 +75,33 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
     {
         return $form
             ->schema([
+                Section::make('Agendamento e Orcamento')
+                    ->schema([
+                        Select::make('destination_type')
+                            ->label('Tipo de destino')
+                            ->options($this->destinationTypeOptions())
+                            ->required()
+                            ->reactive()
+                            ->afterStateUpdated(function (callable $set) {
+                                $set('objective', null);
+                            }),
+                        Select::make('objective')
+                            ->label('Objetivo')
+                            ->options(fn (Get $get) => $this->objectiveOptions($get('destination_type')))
+                            ->disabled(fn (Get $get) => blank($get('destination_type')))
+                            ->placeholder('Selecione o tipo de destino')
+                            ->required(),
+                        DateTimePicker::make('start_at')
+                            ->label('Inicio da campanha')
+                            ->required(),
+                        TextInput::make('daily_budget')
+                            ->label('Orcamento diario (R$)')
+                            ->numeric()
+                            ->required(),
+                        Toggle::make('auto_activate')
+                            ->label('Ativar automaticamente'),
+                    ])
+                    ->columns(2),
                 Section::make('Conexao Meta')
                     ->description('Conecte sua conta do Meta para carregar os ativos.')
                     ->schema([
@@ -96,11 +122,6 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                             ->searchable()
                             ->required(fn () => $this->hasValidConnection())
                             ->disabled(fn () => !$this->hasValidConnection()),
-                        Select::make('instagram_actor_id')
-                            ->label('Conta do Instagram')
-                            ->options(fn () => $this->getInstagramOptions())
-                            ->searchable()
-                            ->disabled(fn () => !$this->hasValidConnection()),
                         Select::make('pixel_id')
                             ->label('Pixel')
                             ->options(fn (Get $get) => $this->getPixelOptions($get('ad_account_id')))
@@ -113,7 +134,9 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                     ->schema([
                         TextInput::make('url_template')
                             ->label('URL de destino')
-                            ->required()
+                            ->required(fn () => ($this->data['destination_type'] ?? null) !== 'WHATSAPP')
+                            ->visible(fn () => ($this->data['destination_type'] ?? null) !== 'WHATSAPP')
+                            ->reactive()
                             ->helperText('Use {cidade} para inserir o nome da cidade.'),
                         Select::make('state')
                             ->label('Estado')
@@ -139,6 +162,8 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                             ->disk('public')
                             ->directory('meta_ads/source')
                             ->image()
+                            ->deletable()
+                            ->nullable()
                             ->maxSize(2048)
                             ->live()
                             ->afterStateUpdated(function ($state, callable $set) {
@@ -186,34 +211,19 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                             ->label('Cor do texto')
                             ->required()
                             ->live(),
+                        Toggle::make('overlay_bg_transparent')
+                            ->label('Fundo transparente')
+                            ->live()
+                            ->afterStateUpdated(fn ($state, callable $set) => $state ? $set('overlay_bg_color', null) : $set('overlay_bg_color', '#000000')),    
                         ColorPicker::make('overlay_bg_color')
                             ->label('Cor do fundo')
-                            ->required()
+                            ->required(fn (Get $get) => !$get('overlay_bg_transparent'))
+                            ->disabled(fn (Get $get) => (bool) $get('overlay_bg_transparent'))
                             ->live(),
                         Hidden::make('overlay_position_x')
                             ->required(),
                         Hidden::make('overlay_position_y')
                             ->required(),
-                    ])
-                    ->columns(2),
-                Section::make('Agendamento e Orcamento')
-                    ->schema([
-                        Select::make('objective')
-                            ->label('Objetivo')
-                            ->options([
-                                'OUTCOME_LEADS' => 'Cadastros',
-                                'OUTCOME_SALES' => 'Vendas',
-                            ])
-                            ->required(),
-                        DateTimePicker::make('start_at')
-                            ->label('Inicio da campanha')
-                            ->required(),
-                        TextInput::make('daily_budget')
-                            ->label('Orcamento diario (R$)')
-                            ->numeric()
-                            ->required(),
-                        Toggle::make('auto_activate')
-                            ->label('Ativar automaticamente'),
                     ])
                     ->columns(2),
             ])
@@ -240,30 +250,59 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
             return;
         }
 
+        if (empty($data['pixel_id'])) {
+            Notification::make()
+                ->danger()
+                ->title('Selecione um pixel antes de criar o lote.')
+                ->send();
+            return;
+        }
+
+        $destinationType = $data['destination_type'] ?? null;
+        $whatsappNumber = null;
+        $urlTemplate = $data['url_template'] ?? '';
+
+        if ($destinationType === 'WHATSAPP') {
+            $whatsappNumber = is_string($data['whatsapp_number'] ?? null)
+                ? preg_replace('/\D/', '', $data['whatsapp_number'])
+                : null;
+
+            $urlTemplate = !empty($data['page_id'])
+                ? sprintf('https://www.facebook.com/%s', $data['page_id'])
+                : '';
+        }
+
         $user = Auth::user();
+
+        $instagramActorId = $data['instagram_actor_id'] ?? $this->connection()?->instagram_actor_id;
 
         $batch = MetaAdBatch::create([
             'user_id' => $user->id,
             'objective' => $data['objective'],
+            'destination_type' => $destinationType,
             'ad_account_id' => $data['ad_account_id'],
             'page_id' => $data['page_id'] ?? null,
-            'instagram_actor_id' => $data['instagram_actor_id'] ?? null,
+            'instagram_actor_id' => $instagramActorId,
             'pixel_id' => $data['pixel_id'] ?? null,
             'start_at' => $data['start_at'],
-            'url_template' => $data['url_template'],
+            'url_template' => $urlTemplate,
             'title_template' => $data['title_template'],
             'body_template' => $data['body_template'],
             'image_path' => $data['image_path'],
             'auto_activate' => (bool) ($data['auto_activate'] ?? false),
             'daily_budget_cents' => (int) round(((float) $data['daily_budget']) * 100),
             'settings' => [
+                'destination_type' => $destinationType,
+                'whatsapp_number' => $whatsappNumber,
                 'state' => $data['state'] ?? null,
                 'city_ids' => $data['city_ids'] ?? [],
                 'overlay_text' => $data['overlay_text'] ?? '{cidade}',
                 'overlay_text_color' => $data['overlay_text_color'] ?? '#ffffff',
-                'overlay_bg_color' => $data['overlay_bg_color'] ?? '#000000',
+                'overlay_bg_color' => $data['overlay_bg_transparent'] ? 'transparent' : ($data['overlay_bg_color'] ?? '#000000'),
+                'overlay_bg_transparent' => (bool) $data['overlay_bg_transparent'],
                 'overlay_position_x' => $data['overlay_position_x'] ?? 50,
                 'overlay_position_y' => $data['overlay_position_y'] ?? 12,
+                
             ],
         ]);
 
@@ -272,7 +311,7 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
             [
                 'ad_account_id' => $data['ad_account_id'],
                 'page_id' => $data['page_id'] ?? null,
-                'instagram_actor_id' => $data['instagram_actor_id'] ?? null,
+                'instagram_actor_id' => $instagramActorId,
                 'pixel_id' => $data['pixel_id'] ?? null,
             ]
         );
@@ -302,7 +341,48 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                     ->label('Erros'),
                 TextColumn::make('meta_campaign_id')
                     ->label('Campanha'),
+            ])
+            ->actions([
+                TableAction::make('cancelBatch')
+                    ->label('Cancelar')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->action(fn (MetaAdBatch $record) => $this->cancelBatch($record))
+                    ->visible(fn (MetaAdBatch $record) => in_array($record->status, ['queued', 'processing'], true)),
             ]);
+    }
+
+    public function cancelBatch(MetaAdBatch $record): void
+    {
+        if ($record->user_id !== Auth::id()) {
+            Notification::make()
+                ->danger()
+                ->title('Voce nao tem permissao para cancelar este lote.')
+                ->send();
+            return;
+        }
+
+        if (!in_array($record->status, ['queued', 'processing'], true)) {
+            Notification::make()
+                ->warning()
+                ->title('Este lote nao pode ser cancelado.')
+                ->send();
+            return;
+        }
+
+        $newStatus = $record->status === 'queued' ? 'cancelled' : 'cancel_requested';
+
+        $record->update([
+            'status' => $newStatus,
+            'cancel_requested_at' => now(),
+            'cancelled_at' => $newStatus === 'cancelled' ? now() : null,
+        ]);
+
+        Notification::make()
+            ->success()
+            ->title('Solicitacao de cancelamento registrada.')
+            ->send();
     }
 
     protected function getHeaderActions(): array
@@ -492,6 +572,35 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
             ->get()
             ->mapWithKeys(fn (City $city) => [$city->id => sprintf('%s - %s', $city->name, $city->state)])
             ->all();
+    }
+
+    private function destinationTypeOptions(): array
+    {
+        return [
+            'WEBSITE' => 'Website',
+            'WHATSAPP' => 'WhatsApp',
+        ];
+    }
+
+    private function objectiveOptions(?string $destinationType): array
+    {
+        if (!$destinationType) {
+            return [];
+        }
+
+        return match ($destinationType) {
+            'WEBSITE' => [
+                'OUTCOME_AWARENESS' => 'Reconhecimento',
+                'OUTCOME_LEADS' => 'Cadastros',
+                'OUTCOME_SALES' => 'Vendas',
+            ],
+            'WHATSAPP' => [
+                'OUTCOME_AWARENESS' => 'Reconhecimento',
+                'OUTCOME_TRAFFIC' => 'Trafego',
+                'OUTCOME_ENGAGEMENT' => 'Engajamento',
+            ],
+            default => [],
+        };
     }
 
     private function stateOptions(): array

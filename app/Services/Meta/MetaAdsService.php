@@ -6,6 +6,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 class MetaAdsService
 {
@@ -21,7 +22,7 @@ class MetaAdsService
             $this->logMeta('debug', 'MetaAdsService fetch ad accounts', $stepContext);
 
             $response = $this->client->get('me/adaccounts', $accessToken, [
-                'fields' => 'id,name,account_id',
+                'fields' => 'id,name',
             ], $stepContext);
 
             return collect(Arr::get($response, 'data', []))
@@ -33,7 +34,7 @@ class MetaAdsService
 
                     $name = $account['name'] ?? $id;
 
-                    return [$this->stripActPrefix($id) => sprintf('%s (%s)', $name, $this->stripActPrefix($id))];
+                    return [$this->stripActPrefix($id) => $name];
                 })
                 ->all();
         });
@@ -148,9 +149,47 @@ class MetaAdsService
 
                     return [$id => $name];
                 })
-                ->all();
+            ->all();
         });
     }
+
+public function fetchPageWhatsAppNumbers(string $accessToken, string $pageId, array $context = []): array
+{
+    $stepContext = array_merge($context, ['step' => 'fetch_page_whatsapp_numbers', 'page_id' => $pageId]);
+    $numbers = [];
+
+    try {
+        // Pedimos todos os campos possÃ­veis de contato da pÃ¡gina
+        $pageRes = $this->client->get($pageId, $accessToken, [
+            'fields' => 'whatsapp_number,name' 
+        ], $stepContext);
+
+        if (!empty($pageRes['whatsapp_number'])) {
+            $num = preg_replace('/\D/', '', $pageRes['whatsapp_number']);
+            $numbers[$num] = $pageRes['whatsapp_number'] . " (Principal da PÃ¡gina)";
+        }
+    } catch (\Throwable $e) {
+        $this->logMeta('debug', 'Erro ao ler whatsapp_number da pÃ¡gina', ['msg' => $e->getMessage()]);
+    }
+
+    return $numbers;
+}
+
+/**
+ * FunÃ§Ã£o auxiliar para buscar nÃºmeros de uma WABA especÃ­fica
+ */
+private function fetchNumbersFromWaba(array $waba, string $accessToken, array &$numbers, array $stepContext): void
+{
+    try {
+        $phones = $this->client->get("{$waba['id']}/phone_numbers", $accessToken, ['fields' => 'display_phone_number'], $stepContext);
+        foreach (Arr::get($phones, 'data', []) as $phone) {
+            if (!empty($phone['display_phone_number'])) {
+                $num = preg_replace('/\D/', '', $phone['display_phone_number']);
+                $numbers[$num] = $phone['display_phone_number'] . " (WABA: {$waba['name']})";
+            }
+        }
+    } catch (\Throwable) {}
+}
 
     public function forgetCacheForUser(int $userId): void
     {
@@ -227,20 +266,24 @@ class MetaAdsService
         string $objective,
         string $name,
         string $status,
-        array $context = []
+        array $context = [],
+        ?array $specialAdCategories = null
     ): ?string {
+        $categories = ['NONE'];
+
         $stepContext = $this->withStep($context, 'create_campaign');
         $this->logMeta('info', 'MetaAdsService create campaign', array_merge($stepContext, [
             'objective' => $objective,
             'name' => $name,
             'status' => $status,
+            'special_ad_categories' => $categories,
         ]));
 
         $response = $this->client->post(sprintf('%s/campaigns', $this->formatAdAccountId($adAccountId)), $accessToken, [
             'name' => $name,
             'objective' => $objective,
             'status' => $status,
-            'special_ad_categories' => json_encode([]),
+            'special_ad_categories' => json_encode($categories),
             'is_adset_budget_sharing_enabled' => false,
         ], $stepContext);
 
@@ -256,7 +299,7 @@ class MetaAdsService
         return $id;
     }
 
-    public function createAdSet(
+public function createAdSet(
         string $accessToken,
         string $adAccountId,
         string $campaignId,
@@ -264,24 +307,45 @@ class MetaAdsService
         string $cityKey,
         int $dailyBudgetCents,
         string $startTimeUtc,
-        string $pixelId,
-        string $conversionEvent,
+        ?string $pixelId,
+        ?string $conversionEvent,
         string $status,
-        array $context = []
+        array $context = [],
+        array $options = []
     ): ?string {
+        $destinationType = $options['destination_type'] ?? null;
+        $pageId = $options['page_id'] ?? null;
+        $optimizationGoal = $options['optimization_goal'] ?? 'OFFSITE_CONVERSIONS';
+
         $stepContext = $this->withStep($context, 'create_ad_set');
         $this->logMeta('info', 'MetaAdsService create ad set', array_merge($stepContext, [
             'campaign_id' => $campaignId,
             'name' => $name,
             'city_key' => $cityKey,
+            'destination_type' => $destinationType,
+            'optimization_goal' => $optimizationGoal,
         ]));
 
-        $response = $this->client->post(sprintf('%s/adsets', $this->formatAdAccountId($adAccountId)), $accessToken, [
+        $promotedObject = [];
+        if ($destinationType == 'WHATSAPP') {
+            if ($pageId) {
+                $promotedObject['page_id'] = $pageId;
+            }
+        } else {
+            if ($pixelId) {
+                $promotedObject['pixel_id'] = $pixelId;
+            }
+            if ($conversionEvent) {
+                $promotedObject['custom_event_type'] = $conversionEvent;
+            }
+        }
+
+        $payload = [
             'name' => $name,
             'campaign_id' => $campaignId,
             'daily_budget' => $dailyBudgetCents,
             'billing_event' => 'IMPRESSIONS',
-            'optimization_goal' => 'OFFSITE_CONVERSIONS',
+            'optimization_goal' => $optimizationGoal,
             'bid_strategy' => 'LOWEST_COST_WITHOUT_CAP',
             'targeting' => json_encode([
                 'geo_locations' => [
@@ -291,14 +355,20 @@ class MetaAdsService
                 ],
                 'device_platforms' => ['mobile'],
             ]),
-            'promoted_object' => json_encode([
-                'pixel_id' => $pixelId,
-                'custom_event_type' => $conversionEvent,
-            ]),
             'status' => $status,
             'start_time' => $startTimeUtc,
             'is_optimized_for_quality' => false,
-        ], $stepContext);
+        ];
+
+        if ($destinationType) {
+            $payload['destination_type'] = $destinationType;
+        }
+
+        if ($promotedObject) {
+            $payload['promoted_object'] = json_encode($promotedObject);
+        }
+
+        $response = $this->client->post(sprintf('%s/adsets', $this->formatAdAccountId($adAccountId)), $accessToken, $payload, $stepContext);
 
         $id = $response['id'] ?? null;
         if ($id) {
@@ -359,7 +429,8 @@ class MetaAdsService
         string $pageId,
         ?string $instagramActorId,
         string $enrollStatus,
-        array $context = []
+        array $context = [],
+        array $options = []
     ): ?string {
         $stepContext = $this->withStep($context, 'create_creative');
         $this->logMeta('info', 'MetaAdsService create creative', array_merge($stepContext, [
@@ -367,20 +438,48 @@ class MetaAdsService
             'enroll_status' => $enrollStatus,
         ]));
 
+        $destinationType = $options['destination_type'] ?? null;
+        $whatsappNumber = $options['whatsapp_number'] ?? null;
+        if (is_string($whatsappNumber)) {
+            $whatsappNumber = preg_replace('/\D/', '', $whatsappNumber);
+        }
+
+        if ($whatsappNumber === '') {
+            $whatsappNumber = null;
+        }
+
+        $payloadLink = $options['link'] ?? $url;
+        if ($destinationType === 'WHATSAPP') {
+            $payloadLink = sprintf('https://www.facebook.com/%s', $pageId);
+        }
+
+        $callToAction = [
+            'type' => $destinationType === 'WHATSAPP' ? 'WHATSAPP_MESSAGE' : 'LEARN_MORE',
+            'value' => [
+                'link' => $payloadLink,
+            ],
+        ];
+
+        if ($destinationType === 'WHATSAPP') {
+            $callToAction['value'] = [
+                'app_destination' => 'WHATSAPP',
+                'link' => $payloadLink,
+            ];
+
+            if ($whatsappNumber) {
+                $callToAction['value']['whatsapp_number'] = $whatsappNumber;
+            }
+        }
+
         $storySpec = [
             'page_id' => $pageId,
             'link_data' => [
                 'image_hash' => $imageHash,
-                'link' => $url,
+                'link' => $payloadLink,
                 'message' => $body,
                 'name' => $title,
                 'description' => $body,
-                'call_to_action' => [
-                    'type' => 'LEARN_MORE',
-                    'value' => [
-                        'link' => $url,
-                    ],
-                ],
+                'call_to_action' => $callToAction,
             ],
         ];
 
@@ -476,15 +575,7 @@ class MetaAdsService
 
     private function formatInstagramLabel(string $labelBase, string $id, ?string $igId, string $primary): string
     {
-        $parts = ["id: {$id}"];
-
-        if ($igId) {
-            $parts[] = "ig_id: {$igId}";
-        }
-
-        $suffix = implode(' | ', $parts);
-
-        return sprintf('%s (%s) [%s]', $labelBase, $suffix, $primary);
+        return $labelBase;
     }
 
     private function withStep(array $context, string $step): array

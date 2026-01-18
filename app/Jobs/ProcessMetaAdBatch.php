@@ -39,6 +39,14 @@ class ProcessMetaAdBatch implements ShouldQueue
             return;
         }
 
+        if ($batch->cancel_requested_at || $batch->status === 'cancel_requested' || $batch->status === 'cancelled') {
+            $batch->update([
+                'status' => 'cancelled',
+                'cancelled_at' => $batch->cancelled_at ?? now(),
+            ]);
+            return;
+        }
+
         $batch->update([
             'status' => 'processing',
             'processed_items' => 0,
@@ -65,13 +73,37 @@ class ProcessMetaAdBatch implements ShouldQueue
         $pageId = $batch->page_id;
         $instagramActorId = $batch->instagram_actor_id;
         $pixelId = $batch->pixel_id;
+        $destinationType = $batch->destination_type ?: Arr::get($batch->settings, 'destination_type');
+        $destinationType = $destinationType ?: 'WEBSITE';
+        $whatsappNumber = Arr::get($batch->settings, 'whatsapp_number');
+        if (is_string($whatsappNumber)) {
+            $whatsappNumber = preg_replace('/\D/', '', $whatsappNumber);
+        }
+        $whatsappNumber = $whatsappNumber ?: null;
         $status = $batch->auto_activate ? 'ACTIVE' : 'PAUSED';
 
         $batchContext = [
             'batch_id' => $batch->id,
             'user_id' => $batch->user_id,
             'ad_account_id' => $adAccountId,
+            'destination_type' => $destinationType,
         ];
+
+        if (!$pixelId) {
+            Log::channel('meta')->error('MetaAds batch missing pixel', $batchContext);
+            $batch->update(['status' => 'failed']);
+            return;
+        }
+
+        if ($destinationType === 'WHATSAPP' && !$pageId) {
+            Log::channel('meta')->error('MetaAds batch missing page_id for WhatsApp', $batchContext);
+            $batch->update(['status' => 'failed']);
+            return;
+        }
+
+        if ($destinationType === 'WHATSAPP' && !$whatsappNumber) {
+            Log::channel('meta')->warning('MetaAds batch missing whatsapp_number for WhatsApp, sending without number', $batchContext);
+        }
 
         Log::channel('meta')->info('MetaAds batch start', $batchContext);
         Log::channel('meta')->info('MetaAds instagram actor selected', array_merge($batchContext, [
@@ -98,7 +130,8 @@ class ProcessMetaAdBatch implements ShouldQueue
                 $batch->objective,
                 $campaignName,
                 $status,
-                $batchContext
+                $batchContext,
+                $this->resolveSpecialAdCategories($batch)
             );
             if (!$campaignId) {
                 Log::channel('meta')->error('MetaAds batch campaign failed', $batchContext);
@@ -110,6 +143,16 @@ class ProcessMetaAdBatch implements ShouldQueue
         }
 
         foreach ($cities as $city) {
+            $batch->refresh();
+            if ($batch->cancel_requested_at || $batch->status === 'cancel_requested') {
+                $batch->update([
+                    'status' => 'cancelled',
+                    'cancelled_at' => $batch->cancelled_at ?? now(),
+                ]);
+                Log::channel('meta')->warning('MetaAds batch cancelled', $batchContext);
+                return;
+            }
+
             $item = $batch->items()->create([
                 'city_id' => $city->id,
                 'city_name' => $city->name,
@@ -156,9 +199,14 @@ class ProcessMetaAdBatch implements ShouldQueue
                     continue;
                 }
 
-                $conversionEvent = $batch->objective === 'OUTCOME_SALES' ? 'PURCHASE' : 'LEAD';
+                $conversionEvent = $this->resolveConversionEvent($batch->objective);
+                $optimizationGoal = $this->resolveOptimizationGoal($batch->objective, $destinationType);
                 $startTimeUtc = $this->formatStartTimeUtc($batch->start_at);
                 $adSetName = sprintf('%s - %s', $city->state, $city->name);
+
+                $usePixel = $destinationType !== 'WHATSAPP' && $conversionEvent !== null;
+                $pixelForAdset = $usePixel ? $pixelId : null;
+                $conversionEventForAdset = $usePixel ? $conversionEvent : null;
 
                 $adSetId = $adsService->createAdSet(
                     $accessToken,
@@ -168,10 +216,15 @@ class ProcessMetaAdBatch implements ShouldQueue
                     $cityKey,
                     $batch->daily_budget_cents,
                     $startTimeUtc,
-                    $pixelId,
-                    $conversionEvent,
+                    $pixelForAdset,
+                    $conversionEventForAdset,
                     $status,
-                    $itemContext
+                    $itemContext,
+                    [
+                        'destination_type' => $destinationType,
+                        'page_id' => $pageId,
+                        'optimization_goal' => $optimizationGoal,
+                    ]
                 );
 
                 if (!$adSetId) {
@@ -197,7 +250,11 @@ class ProcessMetaAdBatch implements ShouldQueue
                     $instagramActorId,
                     'OPT_IN',
                     $itemContext,
-                    $item
+                    $item,
+                    [
+                        'destination_type' => $destinationType,
+                        'whatsapp_number' => $whatsappNumber,
+                    ]
                 );
 
                 if (!$creativeId) {
@@ -214,7 +271,11 @@ class ProcessMetaAdBatch implements ShouldQueue
                         $instagramActorId,
                         'OPT_OUT',
                         $itemContext,
-                        $item
+                        $item,
+                        [
+                            'destination_type' => $destinationType,
+                            'whatsapp_number' => $whatsappNumber,
+                        ]
                     );
                 }
 
@@ -263,9 +324,12 @@ class ProcessMetaAdBatch implements ShouldQueue
             usleep(500000);
         }
 
-        $batch->update([
-            'status' => $batch->error_count > 0 ? 'completed_with_errors' : 'completed',
-        ]);
+        $batch->refresh();
+        if ($batch->status !== 'cancelled' && $batch->status !== 'cancel_requested') {
+            $batch->update([
+                'status' => $batch->error_count > 0 ? 'completed_with_errors' : 'completed',
+            ]);
+        }
 
         Log::channel('meta')->info('MetaAds batch complete', array_merge($batchContext, [
             'status' => $batch->status,
@@ -294,7 +358,14 @@ class ProcessMetaAdBatch implements ShouldQueue
 
     private function buildCampaignName(string $objective): string
     {
-        $label = $objective === 'OUTCOME_SALES' ? 'Compra' : 'Cadastro';
+        $label = match ($objective) {
+            'OUTCOME_SALES' => 'Compra',
+            'OUTCOME_LEADS' => 'Cadastro',
+            'OUTCOME_AWARENESS' => 'Reconhecimento',
+            'OUTCOME_TRAFFIC' => 'Trafego',
+            'OUTCOME_ENGAGEMENT' => 'Engajamento',
+            default => 'Campanha',
+        };
 
         return sprintf('Afiliados %s - %s', $label, now()->format('Y-m-d H:i:s'));
     }
@@ -347,7 +418,8 @@ class ProcessMetaAdBatch implements ShouldQueue
         ?string $instagramActorId,
         string $enrollStatus,
         array $context,
-        MetaAdBatchItem $item
+        MetaAdBatchItem $item,
+        array $creativeOptions = []
     ): ?string {
         try {
             return $adsService->createCreative(
@@ -361,7 +433,8 @@ class ProcessMetaAdBatch implements ShouldQueue
                 $pageId,
                 $instagramActorId,
                 $enrollStatus,
-                $context
+                $context,
+                $creativeOptions
             );
         } catch (Throwable $exception) {
             if ($instagramActorId && Str::contains($exception->getMessage(), 'instagram_actor_id')) {
@@ -385,11 +458,43 @@ class ProcessMetaAdBatch implements ShouldQueue
                     $pageId,
                     null,
                     $enrollStatus,
-                    array_merge($context, ['instagram_fallback' => true])
+                    array_merge($context, ['instagram_fallback' => true]),
+                    $creativeOptions
                 );
             }
 
             throw $exception;
         }
+    }
+
+    private function resolveConversionEvent(string $objective): ?string
+    {
+        return match ($objective) {
+            'OUTCOME_SALES' => 'PURCHASE',
+            'OUTCOME_LEADS' => 'LEAD',
+            default => null,
+        };
+    }
+
+    private function resolveOptimizationGoal(string $objective, string $destinationType): string
+    {
+        if ($destinationType === 'WHATSAPP') {
+            return match ($objective) {
+                'OUTCOME_ENGAGEMENT' => 'REPLIES',
+                'OUTCOME_TRAFFIC' => 'LINK_CLICKS',
+                default => 'REACH',
+            };
+        }
+
+        return match ($objective) {
+            'OUTCOME_SALES', 'OUTCOME_LEADS' => 'OFFSITE_CONVERSIONS',
+            'OUTCOME_TRAFFIC' => 'LINK_CLICKS',
+            default => 'REACH',
+        };
+    }
+
+    private function resolveSpecialAdCategories(MetaAdBatch $batch): array
+    {
+        return ['NONE'];
     }
 }

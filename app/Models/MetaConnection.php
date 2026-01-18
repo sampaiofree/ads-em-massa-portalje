@@ -17,6 +17,7 @@ class MetaConnection extends Model
         'page_id',
         'instagram_actor_id',
         'pixel_id',
+        'special_ad_categories',
         'last_synced_at',
     ];
 
@@ -24,6 +25,7 @@ class MetaConnection extends Model
         'token_expires_at' => 'datetime',
         'last_synced_at' => 'datetime',
         'app_secret' => 'encrypted',
+        'special_ad_categories' => 'array',
     ];
 
     public function user(): BelongsTo

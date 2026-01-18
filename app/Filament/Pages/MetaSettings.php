@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Models\MetaConnection;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Section;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
@@ -31,9 +32,12 @@ class MetaSettings extends Page implements HasForms
     {
         $connection = $this->connection();
 
+        $defaultCategories = $this->defaultSpecialAdCategories();
+
         $this->form->fill([
             'app_id' => $connection?->app_id,
             'app_secret' => null,
+            'special_ad_categories' => $connection?->special_ad_categories ?: $defaultCategories,
         ]);
     }
 
@@ -67,6 +71,17 @@ class MetaSettings extends Page implements HasForms
                             ->content(fn () => $this->connectionStatus()),
                     ])
                     ->columns(1),
+                Section::make('Categorias especiais')
+                    ->description('Selecione categorias exigidas pelo Meta. Padrao: NONE.')
+                    ->schema([
+                        Select::make('special_ad_categories')
+                            ->label('Categorias especiais')
+                            ->options($this->specialAdCategoryOptions())
+                            ->multiple()
+                            ->helperText('Use NONE quando nao se aplica.')
+                            ->default(fn () => $this->defaultSpecialAdCategories()),
+                    ])
+                    ->columns(1),
             ])
             ->statePath('data');
     }
@@ -83,6 +98,8 @@ class MetaSettings extends Page implements HasForms
         if (!empty($data['app_secret'])) {
             $payload['app_secret'] = $data['app_secret'];
         }
+
+        $payload['special_ad_categories'] = $this->normalizeSpecialAdCategories($data['special_ad_categories'] ?? null);
 
         $connection = MetaConnection::firstOrNew(['user_id' => Auth::id()]);
         $oldAppId = $connection->app_id;
@@ -150,5 +167,45 @@ class MetaSettings extends Page implements HasForms
     private function connectionHasSecret(): bool
     {
         return (bool) $this->connection()?->app_secret;
+    }
+
+    private function specialAdCategoryOptions(): array
+    {
+        return [
+            'NONE' => 'NONE (Sem categoria)',
+            'EMPLOYMENT' => 'EMPLOYMENT (Emprego)',
+            'HOUSING' => 'HOUSING (Moradia)',
+            'CREDIT' => 'CREDIT (Credito)',
+            'ISSUES_ELECTIONS_POLITICS' => 'ISSUES_ELECTIONS_POLITICS (Politica)',
+        ];
+    }
+
+    private function defaultSpecialAdCategories(): array
+    {
+        $default = config('meta.special_ad_categories', ['NONE']);
+
+        if (is_string($default)) {
+            $default = array_filter(array_map('trim', explode(',', $default)));
+        }
+
+        return $default ?: ['NONE'];
+    }
+
+    private function normalizeSpecialAdCategories(mixed $value): array
+    {
+        if (is_string($value)) {
+            $value = array_filter(array_map('trim', explode(',', $value)));
+        }
+
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $categories = array_values(array_filter($value, fn ($entry) => is_string($entry) && $entry !== ''));
+        if ($categories === [] || in_array('NONE', $categories, true)) {
+            return ['NONE'];
+        }
+
+        return $categories;
     }
 }
