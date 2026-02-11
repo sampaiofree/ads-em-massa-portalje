@@ -603,6 +603,7 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
             'WEBSITE' => [
                 'OUTCOME_AWARENESS' => 'Reconhecimento',
                 'OUTCOME_LEADS' => 'Cadastros',
+                'OUTCOME_LEADS_CONTENT_VIEW' => 'ContentView',
                 'OUTCOME_SALES' => 'Vendas',
             ],
             'WHATSAPP' => [

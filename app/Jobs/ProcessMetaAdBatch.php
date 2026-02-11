@@ -127,7 +127,7 @@ class ProcessMetaAdBatch implements ShouldQueue
             $campaignId = $adsService->createCampaign(
                 $accessToken,
                 $adAccountId,
-                $batch->objective,
+                $this->resolveCampaignObjective($batch->objective),
                 $campaignName,
                 $status,
                 $batchContext,
@@ -379,6 +379,7 @@ class ProcessMetaAdBatch implements ShouldQueue
         $label = match ($objective) {
             'OUTCOME_SALES' => 'Compra',
             'OUTCOME_LEADS' => 'Cadastro',
+            'OUTCOME_LEADS_CONTENT_VIEW' => 'ContentView',
             'OUTCOME_AWARENESS' => 'Reconhecimento',
             'OUTCOME_TRAFFIC' => 'Trafego',
             'OUTCOME_ENGAGEMENT' => 'Engajamento',
@@ -490,7 +491,16 @@ class ProcessMetaAdBatch implements ShouldQueue
         return match ($objective) {
             'OUTCOME_SALES' => 'PURCHASE',
             'OUTCOME_LEADS' => 'LEAD',
+            'OUTCOME_LEADS_CONTENT_VIEW' => 'CONTENT_VIEW',
             default => null,
+        };
+    }
+
+    private function resolveCampaignObjective(string $objective): string
+    {
+        return match ($objective) {
+            'OUTCOME_LEADS_CONTENT_VIEW' => 'OUTCOME_LEADS',
+            default => $objective,
         };
     }
 
@@ -505,7 +515,7 @@ class ProcessMetaAdBatch implements ShouldQueue
         }
 
         return match ($objective) {
-            'OUTCOME_SALES', 'OUTCOME_LEADS' => 'OFFSITE_CONVERSIONS',
+            'OUTCOME_SALES', 'OUTCOME_LEADS', 'OUTCOME_LEADS_CONTENT_VIEW' => 'OFFSITE_CONVERSIONS',
             'OUTCOME_TRAFFIC' => 'LINK_CLICKS',
             default => 'REACH',
         };
