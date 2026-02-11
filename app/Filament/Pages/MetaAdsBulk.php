@@ -33,6 +33,7 @@ use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Throwable;
 
@@ -568,12 +569,73 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
 
     private function searchCities(string $search): array
     {
+        $search = trim($search);
+        if ($search === '') {
+            return [];
+        }
+
+        $normalizedSearch = $this->normalizeSearchText($search);
+        $normalizedNameSql = $this->normalizedNameSql('name');
+
         return City::query()
-            ->where('name', 'like', '%' . $search . '%')
+            ->where(function ($query) use ($search, $normalizedSearch, $normalizedNameSql) {
+                $query->where('name', 'like', '%' . $search . '%');
+
+                if ($normalizedSearch !== '') {
+                    $query->orWhereRaw("{$normalizedNameSql} like ?", ['%' . $normalizedSearch . '%']);
+                }
+            })
             ->limit(20)
             ->get()
             ->mapWithKeys(fn (City $city) => [$city->id => sprintf('%s - %s', $city->name, $city->state)])
             ->all();
+    }
+
+    private function normalizeSearchText(string $value): string
+    {
+        return (string) Str::of($value)->trim()->lower()->ascii();
+    }
+
+    private function normalizedNameSql(string $column): string
+    {
+        $expression = sprintf('LOWER(%s)', $column);
+
+        foreach ($this->accentMap() as $from => $to) {
+            $expression = sprintf("REPLACE(%s, '%s', '%s')", $expression, $from, $to);
+        }
+
+        return $expression;
+    }
+
+    private function accentMap(): array
+    {
+        return [
+            "\u{00E1}" => 'a',
+            "\u{00E0}" => 'a',
+            "\u{00E2}" => 'a',
+            "\u{00E3}" => 'a',
+            "\u{00E4}" => 'a',
+            "\u{00E5}" => 'a',
+            "\u{00E9}" => 'e',
+            "\u{00E8}" => 'e',
+            "\u{00EA}" => 'e',
+            "\u{00EB}" => 'e',
+            "\u{00ED}" => 'i',
+            "\u{00EC}" => 'i',
+            "\u{00EE}" => 'i',
+            "\u{00EF}" => 'i',
+            "\u{00F3}" => 'o',
+            "\u{00F2}" => 'o',
+            "\u{00F4}" => 'o',
+            "\u{00F5}" => 'o',
+            "\u{00F6}" => 'o',
+            "\u{00FA}" => 'u',
+            "\u{00F9}" => 'u',
+            "\u{00FB}" => 'u',
+            "\u{00FC}" => 'u',
+            "\u{00E7}" => 'c',
+            "\u{00F1}" => 'n',
+        ];
     }
 
     private function getCityLabels(array $values): array
