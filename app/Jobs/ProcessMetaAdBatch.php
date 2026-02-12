@@ -49,20 +49,28 @@ class ProcessMetaAdBatch implements ShouldQueue
 
         $batch->update([
             'status' => 'processing',
+            'error_message' => null,
             'processed_items' => 0,
             'success_count' => 0,
             'error_count' => 0,
         ]);
 
+        $batchContext = [
+            'batch_id' => $batch->id,
+            'user_id' => $batch->user_id,
+            'ad_account_id' => $batch->ad_account_id,
+            'destination_type' => $batch->destination_type ?: Arr::get($batch->settings, 'destination_type') ?: 'WEBSITE',
+        ];
+
         $connection = $batch->user->metaConnection;
         if (!$connection || !$connection->access_token) {
-            $batch->update(['status' => 'failed']);
+            $this->markBatchFailed($batch, 'Conexao Meta ausente ou token invalido.', $batchContext);
             return;
         }
 
         $cities = $this->resolveCities($batch);
         if ($cities->isEmpty()) {
-            $batch->update(['status' => 'failed']);
+            $this->markBatchFailed($batch, 'Nenhuma cidade encontrada para processar.', $batchContext);
             return;
         }
 
@@ -82,22 +90,20 @@ class ProcessMetaAdBatch implements ShouldQueue
         $whatsappNumber = $whatsappNumber ?: null;
         $status = $batch->auto_activate ? 'ACTIVE' : 'PAUSED';
 
-        $batchContext = [
-            'batch_id' => $batch->id,
-            'user_id' => $batch->user_id,
+        $batchContext = array_merge($batchContext, [
             'ad_account_id' => $adAccountId,
             'destination_type' => $destinationType,
-        ];
+        ]);
 
         if (!$pixelId) {
             Log::channel('meta')->error('MetaAds batch missing pixel', $batchContext);
-            $batch->update(['status' => 'failed']);
+            $this->markBatchFailed($batch, 'Pixel nao informado para o lote.', $batchContext);
             return;
         }
 
         if ($destinationType === 'WHATSAPP' && !$pageId) {
             Log::channel('meta')->error('MetaAds batch missing page_id for WhatsApp', $batchContext);
-            $batch->update(['status' => 'failed']);
+            $this->markBatchFailed($batch, 'Pagina do Facebook nao informada para campanha de WhatsApp.', $batchContext);
             return;
         }
 
@@ -135,7 +141,7 @@ class ProcessMetaAdBatch implements ShouldQueue
             );
             if (!$campaignId) {
                 Log::channel('meta')->error('MetaAds batch campaign failed', $batchContext);
-                $batch->update(['status' => 'failed']);
+                $this->markBatchFailed($batch, 'Nao foi possivel criar a campanha no Meta Ads.', $batchContext);
                 return;
             }
 
@@ -338,6 +344,22 @@ class ProcessMetaAdBatch implements ShouldQueue
         ]));
     }
 
+    public function failed(Throwable $exception): void
+    {
+        $batch = MetaAdBatch::find($this->batchId);
+        if (!$batch) {
+            return;
+        }
+
+        if ($batch->status === 'failed' && filled($batch->error_message)) {
+            return;
+        }
+
+        $this->markBatchFailed($batch, 'Erro inesperado no processamento: ' . $exception->getMessage(), [
+            'batch_id' => $this->batchId,
+        ]);
+    }
+
     private function resolveCities(MetaAdBatch $batch)
     {
         $state = Arr::get($batch->settings, 'state');
@@ -422,6 +444,18 @@ class ProcessMetaAdBatch implements ShouldQueue
         ]);
 
         $batch->increment('error_count');
+    }
+
+    private function markBatchFailed(MetaAdBatch $batch, string $message, array $context = []): void
+    {
+        $batch->update([
+            'status' => 'failed',
+            'error_message' => $message,
+        ]);
+
+        Log::channel('meta')->error('MetaAds batch failed', array_merge($context, [
+            'error_message' => $message,
+        ]));
     }
 
     private function createCreativeWithFallback(

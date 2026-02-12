@@ -25,6 +25,7 @@ class MetaAdBatch extends Model
         'auto_activate',
         'daily_budget_cents',
         'status',
+        'error_message',
         'total_items',
         'processed_items',
         'success_count',

@@ -25,6 +25,7 @@ use Filament\Forms\Get;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Support\Enums\MaxWidth;
 use Filament\Tables\Actions\Action as TableAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Contracts\HasTable;
@@ -347,6 +348,11 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge(),
+                TextColumn::make('error_message')
+                    ->label('Erro')
+                    ->limit(80)
+                    ->placeholder('-')
+                    ->wrap(),
                 TextColumn::make('success_count')
                     ->label('Sucesso'),
                 TextColumn::make('error_count')
@@ -355,6 +361,18 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                     ->label('Campanha'),
             ])
             ->actions([
+                TableAction::make('viewBatchItems')
+                    ->label('Ver')
+                    ->icon('heroicon-o-eye')
+                    ->color('gray')
+                    ->modalHeading(fn (MetaAdBatch $record) => 'Itens do lote #' . $record->id)
+                    ->modalWidth(MaxWidth::SevenExtraLarge)
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Fechar')
+                    ->modalContent(fn (MetaAdBatch $record) => view('filament.pages.meta-ad-batch-items-modal', [
+                        'batchId' => $record->id,
+                        'batchErrorMessage' => $record->error_message,
+                    ])),
                 TableAction::make('cancelBatch')
                     ->label('Cancelar')
                     ->icon('heroicon-o-x-circle')
