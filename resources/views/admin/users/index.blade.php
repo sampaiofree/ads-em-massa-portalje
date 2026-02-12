@@ -22,6 +22,7 @@
                 <table class="min-w-full divide-y divide-zinc-200 text-sm dark:divide-zinc-700">
                     <thead class="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
                         <tr>
+                            <th class="px-4 py-3">{{ __('ID') }}</th>
                             <th class="px-4 py-3">{{ __('Nome') }}</th>
                             <th class="px-4 py-3">{{ __('Email') }}</th>
                             <th class="px-4 py-3">{{ __('Admin') }}</th>
@@ -31,6 +32,7 @@
                     <tbody class="divide-y divide-zinc-200 dark:divide-zinc-800">
                         @forelse ($users as $user)
                             <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                                <td class="px-4 py-3 text-zinc-600 dark:text-zinc-300">{{ $user->id }}</td>
                                 <td class="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-100">{{ $user->name }}</td>
                                 <td class="px-4 py-3 text-zinc-600 dark:text-zinc-300">{{ $user->email }}</td>
                                 <td class="px-4 py-3">
@@ -56,7 +58,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td class="px-4 py-6 text-center text-zinc-500 dark:text-zinc-400" colspan="4">
+                                <td class="px-4 py-6 text-center text-zinc-500 dark:text-zinc-400" colspan="5">
                                     {{ __('Nenhum usuário encontrado.') }}
                                 </td>
                             </tr>

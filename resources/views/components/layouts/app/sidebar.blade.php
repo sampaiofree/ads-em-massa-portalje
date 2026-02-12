@@ -15,6 +15,13 @@
                 <flux:navlist.group :heading="__('Platform')" class="grid">
                     <flux:navlist.item icon="home" :href="route('filament.admin.pages.dashboard')" :current="request()->routeIs('filament.admin.pages.dashboard')" wire:navigate>{{ __('Dashboard') }}</flux:navlist.item>
                 </flux:navlist.group>
+
+                @if (auth()->user()->is_admin)
+                    <flux:navlist.group :heading="__('Administrador')" class="grid">
+                        <flux:navlist.item icon="users" :href="route('admin.users.index')" :current="request()->routeIs('admin.users.*')">{{ __('Usuarios') }}</flux:navlist.item>
+                        <flux:navlist.item icon="document-text" :href="route('admin.logs.index')" :current="request()->routeIs('admin.logs.*')">{{ __('Logs') }}</flux:navlist.item>
+                    </flux:navlist.group>
+                @endif
             </flux:navlist>
 
             <flux:spacer />
@@ -62,6 +69,10 @@
 
                     <flux:menu.radio.group>
                         <flux:menu.item :href="route('profile.edit')" icon="cog" wire:navigate>{{ __('Settings') }}</flux:menu.item>
+                        @if (auth()->user()->is_admin)
+                            <flux:menu.item :href="route('admin.users.index')" icon="users">{{ __('Usuarios') }}</flux:menu.item>
+                            <flux:menu.item :href="route('admin.logs.index')" icon="document-text">{{ __('Logs') }}</flux:menu.item>
+                        @endif
                     </flux:menu.radio.group>
 
                     <flux:menu.separator />
@@ -112,6 +123,10 @@
 
                     <flux:menu.radio.group>
                         <flux:menu.item :href="route('profile.edit')" icon="cog" wire:navigate>{{ __('Settings') }}</flux:menu.item>
+                        @if (auth()->user()->is_admin)
+                            <flux:menu.item :href="route('admin.users.index')" icon="users">{{ __('Usuarios') }}</flux:menu.item>
+                            <flux:menu.item :href="route('admin.logs.index')" icon="document-text">{{ __('Logs') }}</flux:menu.item>
+                        @endif
                     </flux:menu.radio.group>
 
                     <flux:menu.separator />
