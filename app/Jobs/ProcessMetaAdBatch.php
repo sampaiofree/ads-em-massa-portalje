@@ -519,6 +519,7 @@ class ProcessMetaAdBatch implements ShouldQueue
     {
         $label = match ($objective) {
             'OUTCOME_SALES' => 'Compra',
+            'OUTCOME_SALES_INITIATE_CHECKOUT' => 'IniciarCheckout',
             'OUTCOME_LEADS' => 'Cadastro',
             'OUTCOME_LEADS_CONTENT_VIEW' => 'ContentView',
             'OUTCOME_AWARENESS' => 'Reconhecimento',
@@ -808,6 +809,7 @@ class ProcessMetaAdBatch implements ShouldQueue
     {
         return match ($objective) {
             'OUTCOME_SALES' => 'PURCHASE',
+            'OUTCOME_SALES_INITIATE_CHECKOUT' => 'INITIATE_CHECKOUT',
             'OUTCOME_LEADS' => 'LEAD',
             'OUTCOME_LEADS_CONTENT_VIEW' => 'CONTENT_VIEW',
             default => null,
@@ -818,6 +820,7 @@ class ProcessMetaAdBatch implements ShouldQueue
     {
         return match ($objective) {
             'OUTCOME_LEADS_CONTENT_VIEW' => 'OUTCOME_LEADS',
+            'OUTCOME_SALES_INITIATE_CHECKOUT' => 'OUTCOME_SALES',
             default => $objective,
         };
     }
@@ -833,7 +836,7 @@ class ProcessMetaAdBatch implements ShouldQueue
         }
 
         return match ($objective) {
-            'OUTCOME_SALES', 'OUTCOME_LEADS', 'OUTCOME_LEADS_CONTENT_VIEW' => 'OFFSITE_CONVERSIONS',
+            'OUTCOME_SALES', 'OUTCOME_SALES_INITIATE_CHECKOUT', 'OUTCOME_LEADS', 'OUTCOME_LEADS_CONTENT_VIEW' => 'OFFSITE_CONVERSIONS',
             'OUTCOME_TRAFFIC' => 'LINK_CLICKS',
             default => 'REACH',
         };

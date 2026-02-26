@@ -1077,6 +1077,7 @@ class MetaAdsBulk extends Page implements HasForms, HasTable
                 'OUTCOME_AWARENESS' => 'Reconhecimento',
                 'OUTCOME_LEADS' => 'Cadastros',
                 'OUTCOME_LEADS_CONTENT_VIEW' => 'ContentView',
+                'OUTCOME_SALES_INITIATE_CHECKOUT' => 'Finalizacao de compra (Initiate Checkout)',
                 'OUTCOME_SALES' => 'Vendas',
             ],
             'WHATSAPP' => [
